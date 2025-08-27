@@ -11,6 +11,9 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
+from PIL import Image
+from skimage import filters, data
+import matplotlib.colors as mcolors
 
 st.set_page_config(page_title="Gradiente de um Campo Escalar", layout="wide")
 st.title("∇V — Gradiente de um Campo Escalar (simulador didático)")
@@ -154,7 +157,9 @@ g_hat = unit(g_pt)
 t_hat = unit(np.array([-g_pt[1], g_pt[0]]))
 
 # ===================== ABAS =====================
-tab_campo, tab_grad, tab_apl = st.tabs(["Campo V & ∇V", "Módulo |∇V|", "Aplicações reais"])
+tab_campo, tab_grad, tab_apl, tab_img = st.tabs(
+    ["Campo V & ∇V", "Módulo |∇V|", "Aplicações reais", "🖼️ Imagem (Sobel)"]
+)
 
 # --- Aba 1: Campo + Gradiente ---
 with tab_campo:
@@ -192,7 +197,6 @@ with tab_campo:
     with colR:
         st.subheader("Fórmula do exemplo")
         st.latex(pr["latex"])
-        st.subheader("Observações para narrar")
         if pr["key"] == "plano":
             st.markdown("- **Gradiente constante**: todas as setas têm mesma direção e módulo.\n- As curvas de nível são **retas**; ∇V é **perpendicular** a elas.")
         elif pr["key"] == "quad_iso":
@@ -218,7 +222,6 @@ with tab_grad:
             fig2.colorbar(c2, ax=ax2, label="|∇V| (taxa de variação máxima)")
         st.pyplot(fig2, clear_figure=True)
     with col2:
-        st.markdown("**Dicas de explicação**")
         st.write("- |∇V| mede **o quanto** V muda por unidade de distância.\n"
                  "- Regiões com **curvas de nível mais juntas** → |∇V| **maior**.\n"
                  "- No plano inclinado, |∇V| é **constante**.\n"
@@ -227,30 +230,119 @@ with tab_grad:
         st.markdown("**No ponto destacado**")
         st.code(f"∇V(px,py) = ({g_pt[0]:+.3f}, {g_pt[1]:+.3f})   |∇V| = {np.linalg.norm(g_pt):.3f}")
 
-# --- Aba 3: Aplicações reais ---
+# --- Aba 3: Aplicações em Computação & Indústria ---
 with tab_apl:
-    st.header("Onde o gradiente aparece no mundo real?")
-    st.markdown("""
-- **Física**  
-  - **Força conservativa**: \\(\\mathbf{F} = -\\nabla V\\) (ex.: gravitação, eletrostática).  
-  - **Calor**: fluxo de calor segue \\(-\\nabla T\\) (da região mais quente pra mais fria).
-- **Engenharia/Geociências**  
-  - **Terreno/Topografia**: gradiente de **altitude** dá **inclinação** (steepness) e **aspect** (direção de maior subida).  
-  - **Fluidos**: escoamento impulsionado por gradiente de **pressão** (Lei de Darcy/Poiseuille).
-- **Visão computacional**  
-  - **Detecção de bordas**: magnitude de \\(\\nabla I\\) (imagem) destaca contornos (Sobel, Canny).
-- **Otimização/Machine Learning**  
-  - **Gradiente de função de custo** guia **gradiente descendente** para minimizar perdas.  
-- **Economia/Planejamento**  
-  - Gradiente de uma **função de utilidade/custo** indica **direção** de maior aumento/diminuição.
-""")
-    st.info("Mnemônico: **o gradiente aponta para onde o escalar cresce mais rápido**; seu módulo é **a taxa máxima** de crescimento local.")
+    st.header("Aplicações em Computação & Indústria (∇ de um escalar)")
 
-    st.subheader("Como conectar com seus exemplos")
-    st.markdown("""
-- **Plano Inclinado** → fluxo de calor constante, campo elétrico uniforme.  
-- **Quadrático (bowl)** → poço potencial (mola) e **campo restaurador**.  
-- **Elíptico** → materiais **anisotrópicos** (condutividade diferente por direção).  
-- **Sela** → superfícies com **curvatura oposta** (estabilidade de equilíbrios).  
-- **Gaussiano** → **colinas** topográficas ou picos de concentração.
-""")
+    with st.expander("1) Bordas em imagens (Sobel/Canny)"):
+        st.latex(r"G_x = I * K_x,\quad G_y = I * K_y,\quad |\nabla I|=\sqrt{G_x^2+G_y^2}")
+        st.markdown("- **Intuição:** bordas são onde a intensidade muda rápido (**|∇I| alto**). "
+                    "Base de detecção de bordas usada em câmeras, inspeção de qualidade e digitalização.")
+
+    with st.expander("2) SIFT / HOG (descritores por orientação do gradiente)"):
+        st.latex(r"\theta = \mathrm{atan2}(G_y, G_x)")
+        st.markdown("- **Ideia:** construir histogramas de **orientação do gradiente** por células. "
+                    "Usado em detecção/descrição de características, OCR e visão embarcada.")
+
+    with st.expander("3) Optical Flow (Lucas–Kanade)"):
+        st.latex(r"\begin{bmatrix}I_x & I_y\end{bmatrix}\begin{bmatrix}u\\v\end{bmatrix} \approx -I_t")
+        st.markdown("- **Ideia:** movimentos pequenos resolvem sistema local com **∇I** e derivada temporal. "
+                    "Aplicado em ADAS/autônomos e estabilização de vídeo.")
+
+    with st.expander("4) Seam Carving (redimensionamento consciente de conteúdo)"):
+        st.latex(r"E(x,y)=|\nabla I(x,y)|")
+        st.markdown("- **Ideia:** remover/insert seams de **menor energia** para preservar conteúdo. "
+                    "Usado em edição de imagens e UIs adaptativas.")
+
+    with st.expander("5) Blending no domínio do gradiente (Poisson blending)"):
+        st.latex(r"\Delta f = \nabla \cdot \mathbf{v} \quad (\text{reconstruir imagem a partir de gradientes})")
+        st.markdown("- **Ideia:** colar objetos preservando padrões de gradiente. "
+                    "Ferramentas como Photoshop/GIMP usam variantes desse princípio.")
+
+    with st.expander("6) Normals de height maps (gráficos/jogos)"):
+        st.latex(r"\mathbf{n} \propto \big(-\tfrac{\partial z}{\partial x},\ -\tfrac{\partial z}{\partial y},\ 1\big)")
+        st.markdown("- **Ideia:** a partir de um **height field**, ∇z dá normais para iluminação realista. "
+                    "Presente em engines 3D e VFX.")
+
+    with st.expander("7) SDF/TSDF em reconstrução 3D"):
+        st.markdown("- **Ideia:** o **gradiente do SDF** fornece **normais** e orientações superficiais. "
+                    "Base para mapeamento 3D (AR/VR), ray-marching e ICP em reconstrução.")
+        
+    with st.expander("8) Otimização & ML (backprop / explicabilidade)"):
+        st.latex(r"\theta \leftarrow \theta - \eta \nabla L(\theta)")
+        st.markdown("- **Ideia:** treinar modelos = descer o **gradiente do loss**. "
+                    "**Integrated Gradients** para atribuição de importância de features.")
+        
+# --- Aba 4: Imagem (Sobel) ---
+with tab_img:
+    st.subheader("Gradiente em imagens: |∇I| (Sobel)")
+    left, right = st.columns([1,1])
+
+    with left:
+        file = st.file_uploader("Envie uma imagem (png/jpg/jpeg)", type=["png","jpg","jpeg"])
+        use_sample = st.checkbox("Usar imagem de exemplo (camera)", value=True)
+        sigma = st.slider("Suavização (σ) antes do Sobel", 0.0, 3.0, 1.0, 0.1)
+        show_ori = st.checkbox("Mostrar orientação do gradiente (matiz)", value=False)
+        thr = st.slider("Limiar para 'bordas' sobre |∇I|", 0.0, 1.0, 0.30, 0.01)
+
+    # --- carregar imagem ---
+    if use_sample:
+        pil = Image.fromarray(data.camera())
+    else:
+        if not file:
+            st.info("Envie uma imagem ou ative 'Usar imagem de exemplo'.")
+            st.stop()
+        pil = Image.open(file).convert("RGB")
+
+    gray = np.asarray(pil.convert("L"), dtype=np.float32) / 255.0
+
+    # --- suavização opcional ---
+    if sigma > 0:
+        from skimage.filters import gaussian
+        gray_s = gaussian(gray, sigma=sigma, preserve_range=True)
+    else:
+        gray_s = gray
+
+    # --- derivadas Sobel (horizontal/vertical), magnitude e orientação ---
+    Gx = filters.sobel_h(gray_s)
+    Gy = filters.sobel_v(gray_s)
+    mag = np.hypot(Gx, Gy)
+    mag /= (mag.max() + 1e-8)
+    ori = (np.arctan2(Gy, Gx) + np.pi) / (2*np.pi)  # 0..1 (mapeável para matiz)
+
+    with right:
+        # imagem original
+        fig0, ax0 = plt.subplots()
+        ax0.imshow(gray, cmap="gray")
+        ax0.set_title("Imagem (tons de cinza)"); ax0.axis("off")
+        st.pyplot(fig0, clear_figure=True)
+
+        # magnitude do gradiente
+        fig1, ax1 = plt.subplots()
+        ax1.imshow(mag, cmap="magma")
+        ax1.set_title("|∇I| (Sobel)"); ax1.axis("off")
+        st.pyplot(fig1, clear_figure=True)
+
+        # orientação colorida (HSV: H=ori, V=mag)
+        if show_ori:
+            HSV = np.zeros((*ori.shape, 3), dtype=np.float32)
+            HSV[..., 0] = ori         # matiz = direção do gradiente
+            HSV[..., 1] = 1.0         # saturação
+            HSV[..., 2] = mag         # valor = intensidade
+            RGB = mcolors.hsv_to_rgb(HSV)
+            fig2, ax2 = plt.subplots()
+            ax2.imshow(RGB)
+            ax2.set_title("Orientação (matiz) + |∇I| (valor)")
+            ax2.axis("off")
+            st.pyplot(fig2, clear_figure=True)
+
+        # bordas por limiar na magnitude
+        edges = (mag >= thr).astype(float)
+        fig3, ax3 = plt.subplots()
+        ax3.imshow(gray, cmap="gray")
+        ax3.imshow(np.ma.masked_where(edges == 0, edges), alpha=0.7, cmap="cool")
+        ax3.set_title(f"Bordas (|∇I| ≥ {thr:.2f}) sobre a imagem")
+        ax3.axis("off")
+        st.pyplot(fig3, clear_figure=True)
+
+    st.caption("Dica didática: bordas são regiões onde a intensidade muda rápido ⇒ |∇I| alto. σ controla ruído; limiar destaca contornos mais fortes.")
