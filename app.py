@@ -1,232 +1,256 @@
-# app.py
+# app.py — Gradiente de um Campo Escalar (focado e didático)
+# --------------------------------------------
+# 5 presets prontos:
+# 1) Plano Inclinado:     V = a x + b y            -> ∇V = (a, b) (constante)
+# 2) Quadrático isótropo: V = 1/2 k (x^2 + y^2)    -> ∇V = (k x, k y)
+# 3) Elíptico anisótropo: V = 1/2 (kx x^2 + ky y^2)-> ∇V = (kx x, ky y)
+# 4) Sela (hiperbólico):  V = x^2 - y^2            -> ∇V = (2x, -2y)
+# 5) Gaussiano (pico):    V = A exp(-x^2/2σx^2 - y^2/2σy^2)
+#                          -> ∇V = V * (x/σx^2, y/σy^2) (aponta pro pico)
+# --------------------------------------------
 import numpy as np
 import matplotlib.pyplot as plt
 import streamlit as st
 
-st.set_page_config(page_title="Simulador de Campos e Gradiente", layout="wide")
-st.title("🛰️ Campos escalares, vetoriais, gradiente e derivada direcional (interativo)")
+st.set_page_config(page_title="Gradiente de um Campo Escalar", layout="wide")
+st.title("∇V — Gradiente de um Campo Escalar (simulador didático)")
 
-# ========= Núcleo =========
+# ===================== Utilitários de grade e gradiente =====================
 def make_grid(xlim, n):
     x = np.linspace(-xlim, xlim, n)
     y = np.linspace(-xlim, xlim, n)
     X, Y = np.meshgrid(x, y)
     return x, y, X, Y
 
-def potential(kind, X, Y, origin, G, M, k_quad):
-    dx = X - origin[0]
-    dy = Y - origin[1]
-    r = np.hypot(dx, dy)
-    if kind == "Gravitacional (-GM/r)":
-        # potencial específico (J/kg): V = -GM/r
-        eps = 1e3
-        V = -G * M / (r + eps)
-    else:
-        # Quadrático: V = 1/2 * k * r^2
-        V = 0.5 * k_quad * (dx**2 + dy**2)
-    return V
+def gradient(V, x, y):
+    dy = y[1] - y[0]
+    dx = x[1] - x[0]
+    # Atenção: np.gradient retorna [dV/dy, dV/dx] na ordem dos eixos
+    dV_dy, dV_dx = np.gradient(V, dy, dx)
+    return dV_dx, dV_dy  # (grad_x, grad_y)
 
-def grad_from_field(V, x, y):
-    # gradV_y, gradV_x com base nos eixos (linhas->y, colunas->x)
-    gradV_y, gradV_x = np.gradient(V, y[1]-y[0], x[1]-x[0])
-    return gradV_x, gradV_y
+def sample_vec_at(px, py, x, y, U, V):
+    i = int(np.argmin(np.abs(x - px)))
+    j = int(np.argmin(np.abs(y - py)))
+    return np.array([U[j, i], V[j, i]])
 
-def sample_grad_at(px, py, x, y, gradV_x, gradV_y):
-    i = np.argmin(np.abs(x - px))
-    j = np.argmin(np.abs(y - py))
-    return np.array([gradV_x[j, i], gradV_y[j, i]])
+def unit(v, eps=1e-12):
+    n = np.linalg.norm(v)
+    return v / (n + eps)
 
-def acceleration(kind, pos, origin, G, M, k_quad):
-    dx = origin[0] - pos[0]
-    dy = origin[1] - pos[1]
-    if kind == "Gravitacional (-GM/r)":
-        r = np.hypot(dx, dy) + 1e3
-        a = (G * M / r**3) * np.array([dx, dy])  # = -∇V (V=-GM/r)
-    else:
-        # V = 1/2 k ||p-origin||^2  =>  ∇V = k (p-origin)  => a = -∇V
-        a = -k_quad * (pos - origin)
-    return a
+# ===================== Presets =====================
+def get_presets():
+    # Cada preset define: nome, fórmula LaTeX, função V(X,Y), domínios/valores padrão e ponto de destaque
+    presets = []
 
-def step_euler(kind, pos, vel, dt, origin, G, M, k_quad):
-    vel = vel + acceleration(kind, pos, origin, G, M, k_quad) * dt
-    pos = pos + vel * dt
-    return pos, vel
+    # 1) Plano Inclinado
+    presets.append({
+        "key": "plano",
+        "nome": "Plano Inclinado",
+        "latex": r"V(x,y) = a\,x + b\,y \quad\Rightarrow\quad \nabla V = (a,\; b)",
+        "params": {"a": 1.0, "b": 0.5},
+        "xlim": 5.0, "n": 41,
+        "ponto": (1.5, -1.0),
+        "V": lambda X, Y, p: p["a"]*X + p["b"]*Y
+    })
 
-def step_rk4(kind, pos, vel, dt, origin, G, M, k_quad):
-    def deriv(p, v):
-        a = acceleration(kind, p, origin, G, M, k_quad)
-        return a
-    # p' = v ; v' = a(p)
-    k1_p = vel
-    k1_v = deriv(pos, vel)
+    # 2) Quadrático isótropo
+    presets.append({
+        "key": "quad_iso",
+        "nome": "Quadrático Isótropo",
+        "latex": r"V(x,y) = \tfrac{1}{2}k(x^2 + y^2) \quad\Rightarrow\quad \nabla V = (k\,x,\; k\,y)",
+        "params": {"k": 1.0},
+        "xlim": 4.0, "n": 49,
+        "ponto": (2.0, 1.0),
+        "V": lambda X, Y, p: 0.5*p["k"]*(X**2 + Y**2)
+    })
 
-    k2_p = vel + 0.5*dt*k1_v
-    k2_v = deriv(pos + 0.5*dt*k1_p, vel + 0.5*dt*k1_v)
+    # 3) Elíptico anisótropo
+    presets.append({
+        "key": "eliptico",
+        "nome": "Quadrático Elíptico (anisótropo)",
+        "latex": r"V(x,y) = \tfrac{1}{2}(k_x x^2 + k_y y^2) \Rightarrow \nabla V = (k_x x,\; k_y y)",
+        "params": {"kx": 2.0, "ky": 0.6},
+        "xlim": 4.0, "n": 49,
+        "ponto": (1.5, 2.0),
+        "V": lambda X, Y, p: 0.5*(p["kx"]*X**2 + p["ky"]*Y**2)
+    })
 
-    k3_p = vel + 0.5*dt*k2_v
-    k3_v = deriv(pos + 0.5*dt*k2_p, vel + 0.5*dt*k2_v)
+    # 4) Sela
+    presets.append({
+        "key": "sela",
+        "nome": "Sela (hiperbólico)",
+        "latex": r"V(x,y) = x^2 - y^2 \quad\Rightarrow\quad \nabla V = (2x,\; -2y)",
+        "params": {},
+        "xlim": 4.0, "n": 49,
+        "ponto": (2.0, 1.5),
+        "V": lambda X, Y, p: (X**2 - Y**2)
+    })
 
-    k4_p = vel + dt*k3_v
-    k4_v = deriv(pos + dt*k3_p, vel + dt*k3_v)
+    # 5) Gaussiano (pico)
+    presets.append({
+        "key": "gauss",
+        "nome": "Gaussiano (pico)",
+        "latex": r"V(x,y) = A\,e^{-\frac{x^2}{2\sigma_x^2} - \frac{y^2}{2\sigma_y^2}}"
+                 r"\;\Rightarrow\; \nabla V = V\left(\frac{x}{\sigma_x^2},\,\frac{y}{\sigma_y^2}\right)",
+        "params": {"A": 1.0, "sigx": 1.4, "sigy": 0.8},
+        "xlim": 4.0, "n": 59,
+        "ponto": (1.0, 1.0),
+        "V": lambda X, Y, p: p["A"]*np.exp(-(X**2)/(2*p["sigx"]**2) - (Y**2)/(2*p["sigy"]**2))
+    })
+    return presets
 
-    pos_next = pos + (dt/6.0)*(k1_p + 2*k2_p + 2*k3_p + k4_p)
-    vel_next = vel + (dt/6.0)*(k1_v + 2*k2_v + 2*k3_v + k4_v)
-    return pos_next, vel_next
+PRESETS = get_presets()
+preset_names = [f"{i+1}) {pr['nome']}" for i, pr in enumerate(PRESETS)]
+preset_idx = st.sidebar.radio("Escolha um exemplo (pré-definido)", list(range(len(PRESETS))),
+                              format_func=lambda i: preset_names[i], index=0)
 
-# ========= Sidebar =========
-with st.sidebar:
-    st.header("Parâmetros do campo")
-    campo_kind = st.selectbox("Campo escalar", ["Gravitacional (-GM/r)", "Quadrático (½ k r²)"])
-    G = st.number_input("G (m³/kg/s²)", value=6.67430e-11, format="%.6e")
-    M = st.number_input("Massa central M (kg)", value=5.972e24, format="%.3e")
-    k_quad = st.number_input("k (para campo quadrático)", value=1e-12, format="%.3e")
+pr = PRESETS[preset_idx]
 
-    st.subheader("Espaço / Grade")
-    xlim = st.number_input("Limite |x|=|y| (m)", value=6e7, step=1e6, format="%.0f")
-    grid_n = st.slider("Resolução da grade", 10, 80, 26, 2)
+# ===================== Parâmetros do preset =====================
+st.sidebar.subheader("Parâmetros do exemplo")
+# Mostra os parâmetros (fixos por padrão), com opção de ajustar
+params = dict(pr["params"])  # cópia
 
-    st.subheader("Derivada Direcional")
-    ponto_x = st.number_input("Ponto x (m)", value=3e7, format="%.0f")
-    ponto_y = st.number_input("Ponto y (m)", value=3e7, format="%.0f")
-    theta_deg = st.slider("Ângulo θ (graus)", 0, 360, 45, 1)
+advanced = st.sidebar.checkbox("Ajustar parâmetros manualmente", value=False)
+if advanced:
+    if pr["key"] == "plano":
+        params["a"] = st.sidebar.number_input("a", value=params["a"], step=0.1)
+        params["b"] = st.sidebar.number_input("b", value=params["b"], step=0.1)
+    elif pr["key"] == "quad_iso":
+        params["k"] = st.sidebar.number_input("k", value=params["k"], step=0.1)
+    elif pr["key"] == "eliptico":
+        params["kx"] = st.sidebar.number_input("k_x", value=params["kx"], step=0.1)
+        params["ky"] = st.sidebar.number_input("k_y", value=params["ky"], step=0.1)
+    elif pr["key"] == "gauss":
+        params["A"] = st.sidebar.number_input("A", value=params["A"], step=0.1)
+        params["sigx"] = st.sidebar.number_input("σ_x", value=params["sigx"], step=0.1)
+        params["sigy"] = st.sidebar.number_input("σ_y", value=params["sigy"], step=0.1)
 
-    st.subheader("Exibição")
-    show_streamlines = st.checkbox("Mostrar streamlines (linhas de campo)", True)
-    show_colorbar = st.checkbox("Mostrar colorbar do escalar", True)
+# Grade e ponto de destaque
+st.sidebar.subheader("Espaço e ponto de destaque")
+xlim = st.sidebar.number_input("|x| = |y| (limite do plano)", value=float(pr["xlim"]), step=0.5)
+n = st.sidebar.slider("Resolução da grade", min_value=25, max_value=101, step=2, value=pr["n"])
+px = st.sidebar.number_input("x do ponto (destaque)", value=float(pr["ponto"][0]), step=0.1)
+py = st.sidebar.number_input("y do ponto (destaque)", value=float(pr["ponto"][1]), step=0.1)
 
-    st.subheader("Simulação orbital")
-    x0 = st.number_input("x0 (m)", value=6e7, format="%.0f")
-    y0 = st.number_input("y0 (m)", value=0.0, format="%.0f")
-    vx0 = st.number_input("vx0 (m/s)", value=0.0, format="%.1f")
-    vy0 = st.number_input("vy0 (m/s)", value=2000.0, format="%.1f")
-    dt = st.number_input("Δt (s)", value=60.0, min_value=0.1, step=10.0, format="%.1f")
-    steps = st.slider("Passos", 50, 4000, 800, 50)
-    integrator_name = st.selectbox("Integrador", ["RK4 (estável)", "Euler (simples)"])
-    show_bg_sim = st.checkbox("Fundo com escalar + campo na simulação", False)
+# Opções visuais
+st.sidebar.subheader("Exibição")
+show_quiver = st.sidebar.checkbox("Mostrar ∇V como setas (quiver)", value=True)
+show_stream = st.sidebar.checkbox("Mostrar linhas de fluxo do ∇V (streamlines)", value=True)
+show_colorbar = st.sidebar.checkbox("Mostrar colorbar", value=True)
+skip = st.sidebar.slider("Espaçamento das setas (quiver)", 1, 5, 2)
 
-origin = np.array([0.0, 0.0])
-x, y, X, Y = make_grid(xlim, grid_n)
-V = potential(campo_kind, X, Y, origin, G, M, k_quad)
-gradV_x, gradV_y = grad_from_field(V, x, y)
-Fx, Fy = -gradV_x, -gradV_y  # campo vetorial associado
+# ===================== Cálculo =====================
+x, y, X, Y = make_grid(xlim, n)
+V = pr["V"](X, Y, params)
 
-theta = np.deg2rad(theta_deg)
-v_hat = np.array([np.cos(theta), np.sin(theta)])
-grad_p = sample_grad_at(ponto_x, ponto_y, x, y, gradV_x, gradV_y)
-D_dir = float(grad_p @ v_hat)
+grad_x, grad_y = gradient(V, x, y)
+Gnorm = np.sqrt(grad_x**2 + grad_y**2)
 
-# ========= Abas =========
-tab_e, tab_v, tab_g, tab_d, tab_sim = st.tabs(
-    ["🟦 Escalar", "🟧 Vetorial", "🟩 Gradiente", "🟪 Direcional", "🎬 Simulação"]
-)
+g_pt = sample_vec_at(px, py, x, y, grad_x, grad_y)
+g_hat = unit(g_pt)
+# vetor tangente (aprox.) à curva de nível local (ortogonal ao gradiente)
+t_hat = unit(np.array([-g_pt[1], g_pt[0]]))
 
-# --- Escalar ---
-with tab_e:
-    fig, ax = plt.subplots(figsize=(7,7))
-    ax.set_aspect('equal', adjustable='box')
-    ax.set_xlim(-xlim, xlim); ax.set_ylim(-xlim, xlim)
-    ax.grid(True, alpha=0.2)
-    ax.set_title("Campo escalar V(x,y) (contornos)")
+# ===================== ABAS =====================
+tab_campo, tab_grad, tab_apl = st.tabs(["Campo V & ∇V", "Módulo |∇V|", "Aplicações reais"])
 
-    cf = ax.contourf(X, Y, V, levels=50, cmap='viridis', alpha=0.9)
-    ax.contour(X, Y, V, levels=20, colors='k', linewidths=0.3, alpha=0.5)
-
-    if show_colorbar:
-        fig.colorbar(cf, ax=ax, label="Potencial V (J/kg)")
-
-    st.pyplot(fig, clear_figure=True)
-
-# --- Vetorial ---
-with tab_v:
-    fig, ax = plt.subplots(figsize=(7,7))
-    ax.set_aspect('equal', adjustable='box')
-    ax.set_xlim(-xlim, xlim); ax.set_ylim(-xlim, xlim)
-    ax.grid(True, alpha=0.2)
-    ax.set_title("Campo vetorial F = -∇V (quiver)")
-
-    ax.quiver(X, Y, Fx, Fy, alpha=0.7)
-    if show_streamlines:
-        ax.streamplot(x, y, Fx, Fy, color='k', density=1.2, linewidth=0.8, arrowsize=1)
-
-    st.pyplot(fig, clear_figure=True)
-
-# --- Gradiente ---
-with tab_g:
-    fig, ax = plt.subplots(figsize=(7,7))
-    ax.set_aspect('equal', adjustable='box')
-    ax.set_xlim(-xlim, xlim); ax.set_ylim(-xlim, xlim)
-    ax.grid(True, alpha=0.2)
-    ax.set_title("Gradiente ∇V sobre as curvas de nível")
-
-    cs = ax.contour(X, Y, V, levels=25, colors='k', linewidths=0.4, alpha=0.5)
-    ax.quiver(X, Y, gradV_x, gradV_y, color='orange', alpha=0.7)
-
-    # no ponto escolhido, mostre ∇V e v̂
-    esc = xlim/6
-    ax.quiver(ponto_x, ponto_y, grad_p[0]*esc, grad_p[1]*esc, color='orange', scale=1, scale_units='xy')
-    ax.quiver(ponto_x, ponto_y, v_hat[0]*esc,  v_hat[1]*esc,  color='red',    scale=1, scale_units='xy')
-    ax.plot([ponto_x], [ponto_y], 'bo')
-
-    st.pyplot(fig, clear_figure=True)
-
-# --- Direcional ---
-with tab_d:
-    c1, c2 = st.columns([1.2, 1])
-    with c1:
-        fig, ax = plt.subplots(figsize=(7,7))
+# --- Aba 1: Campo + Gradiente ---
+with tab_campo:
+    colL, colR = st.columns([2, 1])
+    with colL:
+        fig, ax = plt.subplots(figsize=(7.5, 7.5))
         ax.set_aspect('equal', adjustable='box')
         ax.set_xlim(-xlim, xlim); ax.set_ylim(-xlim, xlim)
         ax.grid(True, alpha=0.2)
-        ax.set_title("Derivada direcional no ponto")
-
-        cf = ax.contourf(X, Y, V, levels=40, cmap='viridis', alpha=0.85)
-        ax.contour(X, Y, V, levels=20, colors='k', linewidths=0.3, alpha=0.5)
+        ax.set_title(f"{pr['nome']} — V(x,y) e ∇V")
+        # Contornos do escalar
+        cf = ax.contourf(X, Y, V, levels=40, cmap="viridis", alpha=0.9)
+        ax.contour(X, Y, V, levels=20, colors='k', linewidths=0.4, alpha=0.5)
         if show_colorbar:
-            fig.colorbar(cf, ax=ax, label="Potencial V (J/kg)")
+            fig.colorbar(cf, ax=ax, label="V (escala arbitrária)")
 
-        esc = xlim/6
-        ax.quiver(ponto_x, ponto_y, grad_p[0]*esc, grad_p[1]*esc, color='orange', scale=1, scale_units='xy', label="∇V")
-        ax.quiver(ponto_x, ponto_y, v_hat[0]*esc,  v_hat[1]*esc,  color='red',    scale=1, scale_units='xy', label="v̂")
-        ax.legend(loc='upper right')
+        # Campo de gradiente (quiver/streamlines)
+        if show_quiver:
+            ax.quiver(X[::skip, ::skip], Y[::skip, ::skip],
+                      grad_x[::skip, ::skip], grad_y[::skip, ::skip],
+                      alpha=0.8, color="orange")
+
+        if show_stream:
+            ax.streamplot(x, y, grad_x, grad_y, color="white",
+                          density=1.2, linewidth=0.8, arrowsize=1)
+
+        # Ponto de destaque + vetores g (normal) e t (tangente)
+        esc = xlim/5
+        ax.plot([px], [py], 'ro', ms=6)
+        ax.quiver(px, py, g_hat[0]*esc, g_hat[1]*esc, color='orange', scale=1, scale_units='xy', label="∇V (direção de maior aumento)")
+        ax.quiver(px, py, t_hat[0]*esc, t_hat[1]*esc, color='cyan', scale=1, scale_units='xy', label="t (tangente à curva de nível)")
+        ax.legend(loc="upper right")
         st.pyplot(fig, clear_figure=True)
-    with c2:
-        st.markdown(f"**D₍v̂₎V em ({ponto_x:.2e}, {ponto_y:.2e}) m:**")
-        st.code(f"{D_dir:.3e} J/kg/m")
-        thetas = np.linspace(0, 2*np.pi, 181)
-        Dv = [float(grad_p @ np.array([np.cos(t), np.sin(t)])) for t in thetas]
-        figp, axp = plt.subplots(figsize=(5,3.5))
-        axp.plot(np.degrees(thetas), Dv)
-        axp.set_xlabel("θ (graus)"); axp.set_ylabel("D_{v̂} V")
-        axp.set_title("Variação de D_{v̂}V com θ")
-        axp.grid(True, alpha=0.3)
-        st.pyplot(figp, clear_figure=True)
 
-# --- Simulação ---
-with tab_sim:
-    placeholder = st.empty()
-    run = st.button("Iniciar simulação", type="primary")
-    if run:
-        pos = np.array([x0, y0], dtype=float)
-        vel = np.array([vx0, vy0], dtype=float)
-        xs, ys = [pos[0]], [pos[1]]
+    with colR:
+        st.subheader("Fórmula do exemplo")
+        st.latex(pr["latex"])
+        st.subheader("Observações para narrar")
+        if pr["key"] == "plano":
+            st.markdown("- **Gradiente constante**: todas as setas têm mesma direção e módulo.\n- As curvas de nível são **retas**; ∇V é **perpendicular** a elas.")
+        elif pr["key"] == "quad_iso":
+            st.markdown("- **Radialidade**: ∇V aponta para **fora**; módulo cresce com a distância.\n- Curvas de nível são **círculos**; ∇V é perpendicular aos círculos.")
+        elif pr["key"] == "eliptico":
+            st.markdown("- **Anisotropia**: alonga mais no eixo com **k maior**.\n- ∇V tem componente mais forte onde a curvatura é maior.")
+        elif pr["key"] == "sela":
+            st.markdown("- **Subida numa direção e descida na outra**.\n- ∇V muda de direção conforme quadrante; curvas de nível são **hipérboles**.")
+        elif pr["key"] == "gauss":
+            st.markdown("- **Pico central**: ∇V aponta para o **pico** (maior V).\n- Módulo máximo nas **encostas** do pico (onde V varia mais).")
 
-        stepper = step_rk4 if integrator_name.startswith("RK4") else step_euler
-        for k in range(steps):
-            pos, vel = stepper(campo_kind, pos, vel, dt, origin, G, M, k_quad)
-            xs.append(pos[0]); ys.append(pos[1])
+# --- Aba 2: Módulo do gradiente ---
+with tab_grad:
+    col1, col2 = st.columns([2,1])
+    with col1:
+        fig2, ax2 = plt.subplots(figsize=(7.5, 7.5))
+        ax2.set_aspect('equal', adjustable='box')
+        ax2.set_xlim(-xlim, xlim); ax2.set_ylim(-xlim, xlim)
+        ax2.grid(True, alpha=0.2)
+        ax2.set_title("|∇V| — intensidade da subida máxima")
+        c2 = ax2.contourf(X, Y, Gnorm, levels=40, cmap="magma", alpha=0.95)
+        if show_colorbar:
+            fig2.colorbar(c2, ax=ax2, label="|∇V| (taxa de variação máxima)")
+        st.pyplot(fig2, clear_figure=True)
+    with col2:
+        st.markdown("**Dicas de explicação**")
+        st.write("- |∇V| mede **o quanto** V muda por unidade de distância.\n"
+                 "- Regiões com **curvas de nível mais juntas** → |∇V| **maior**.\n"
+                 "- No plano inclinado, |∇V| é **constante**.\n"
+                 "- No quadrático, |∇V| cresce com a **distância ao centro**.\n"
+                 "- No gaussiano, |∇V| é **máximo nas encostas**, não no pico.")
+        st.markdown("**No ponto destacado**")
+        st.code(f"∇V(px,py) = ({g_pt[0]:+.3f}, {g_pt[1]:+.3f})   |∇V| = {np.linalg.norm(g_pt):.3f}")
 
-            fig2, ax2 = plt.subplots(figsize=(7,7))
-            ax2.set_aspect('equal', adjustable='box')
-            ax2.set_xlim(-xlim, xlim); ax2.set_ylim(-xlim, xlim)
-            ax2.grid(True, alpha=0.2)
-            ax2.set_title(f"Órbita — passo {k+1}/{steps} | r = {np.hypot(pos[0], pos[1]):.2e} m")
+# --- Aba 3: Aplicações reais ---
+with tab_apl:
+    st.header("Onde o gradiente aparece no mundo real?")
+    st.markdown("""
+- **Física**  
+  - **Força conservativa**: \\(\\mathbf{F} = -\\nabla V\\) (ex.: gravitação, eletrostática).  
+  - **Calor**: fluxo de calor segue \\(-\\nabla T\\) (da região mais quente pra mais fria).
+- **Engenharia/Geociências**  
+  - **Terreno/Topografia**: gradiente de **altitude** dá **inclinação** (steepness) e **aspect** (direção de maior subida).  
+  - **Fluidos**: escoamento impulsionado por gradiente de **pressão** (Lei de Darcy/Poiseuille).
+- **Visão computacional**  
+  - **Detecção de bordas**: magnitude de \\(\\nabla I\\) (imagem) destaca contornos (Sobel, Canny).
+- **Otimização/Machine Learning**  
+  - **Gradiente de função de custo** guia **gradiente descendente** para minimizar perdas.  
+- **Economia/Planejamento**  
+  - Gradiente de uma **função de utilidade/custo** indica **direção** de maior aumento/diminuição.
+""")
+    st.info("Mnemônico: **o gradiente aponta para onde o escalar cresce mais rápido**; seu módulo é **a taxa máxima** de crescimento local.")
 
-            if show_bg_sim:
-                cf2 = ax2.contourf(X, Y, V, levels=30, cmap='viridis', alpha=0.7)
-                ax2.quiver(X, Y, Fx, Fy, alpha=0.35)
-
-            ax2.plot(xs, ys, 'b-', lw=1, label="trajetória")
-            ax2.plot(pos[0], pos[1], 'ro', label="corpo")
-            ax2.legend(loc='upper right')
-
-            placeholder.pyplot(fig2, clear_figure=True)
+    st.subheader("Como conectar com seus exemplos")
+    st.markdown("""
+- **Plano Inclinado** → fluxo de calor constante, campo elétrico uniforme.  
+- **Quadrático (bowl)** → poço potencial (mola) e **campo restaurador**.  
+- **Elíptico** → materiais **anisotrópicos** (condutividade diferente por direção).  
+- **Sela** → superfícies com **curvatura oposta** (estabilidade de equilíbrios).  
+- **Gaussiano** → **colinas** topográficas ou picos de concentração.
+""")
